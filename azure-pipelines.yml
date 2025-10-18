@@ -1,0 +1,119 @@
+# Azure DevOps Pipeline - Deploy to Snowflake SPCS
+# Builds Docker image and pushes to Snowflake Container Registry
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pr: none
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Snowflake Registry
+  REGISTRY_URL: 'bnmbckj-vi07646.registry.snowflakecomputing.com'
+  IMAGE_REPOSITORY: 'ltc_api_repo/images/fastapi_repo/ltc-api'
+  # Version tag (timestamp-based)
+  IMAGE_TAG: $(Build.BuildNumber)
+
+stages:
+  - stage: Build
+    displayName: 'Build and Push Docker Image'
+    jobs:
+      - job: BuildImage
+        displayName: 'Build Docker Image'
+        steps:
+          - task: Bash@3
+            displayName: 'Set Build Version'
+            inputs:
+              targetType: 'inline'
+              script: |
+                VERSION=$(date +%Y%m%d.%H%M%S)
+                echo "##vso[build.updatebuildnumber]$VERSION"
+                echo "Building version: $VERSION"
+          
+          - task: Docker@2
+            displayName: 'Build Docker Image'
+            inputs:
+              command: 'build'
+              repository: '$(IMAGE_REPOSITORY)'
+              dockerfile: 'Dockerfile'
+              tags: |
+                $(IMAGE_TAG)
+                latest
+          
+          - task: Docker@2
+            displayName: 'Login to Snowflake Registry'
+            inputs:
+              command: 'login'
+              containerRegistry: 'SnowflakeDockerRegistry'
+          
+          - task: Bash@3
+            displayName: 'Tag Image for Snowflake'
+            inputs:
+              targetType: 'inline'
+              script: |
+                docker tag $(IMAGE_REPOSITORY):$(IMAGE_TAG) \
+                  $(REGISTRY_URL)/$(IMAGE_REPOSITORY):$(IMAGE_TAG)
+                
+                docker tag $(IMAGE_REPOSITORY):latest \
+                  $(REGISTRY_URL)/$(IMAGE_REPOSITORY):latest
+                
+                echo "Tagged images for Snowflake registry"
+          
+          - task: Bash@3
+            displayName: 'Push to Snowflake Registry'
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "Pushing version: $(IMAGE_TAG)"
+                docker push $(REGISTRY_URL)/$(IMAGE_REPOSITORY):$(IMAGE_TAG)
+                docker push $(REGISTRY_URL)/$(IMAGE_REPOSITORY):latest
+                
+                echo "✅ Image pushed successfully!"
+                echo "Image: $(REGISTRY_URL)/$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+          
+          - task: Bash@3
+            displayName: 'Deployment Info'
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "============================================"
+                echo "DEPLOYMENT INFORMATION"
+                echo "============================================"
+                echo "Registry: $(REGISTRY_URL)"
+                echo "Image: $(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+                echo "Full path: $(REGISTRY_URL)/$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+                echo ""
+                echo "Next steps in Snowflake:"
+                echo "1. Verify image: SHOW IMAGES IN IMAGE REPOSITORY LTC_API_REPO.IMAGES.FASTAPI_REPO;"
+                echo "2. Create/update service with image tag: $(IMAGE_TAG)"
+                echo "============================================"
+
+  - stage: Verify
+    displayName: 'Verification Instructions'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: VerifyDeployment
+        displayName: 'Show Verification Steps'
+        steps:
+          - task: Bash@3
+            displayName: 'Snowflake Verification Commands'
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "Run these commands in Snowflake to verify and deploy:"
+                echo ""
+                echo "-- 1. Verify image exists"
+                echo "USE DATABASE LTC_API_REPO;"
+                echo "USE SCHEMA IMAGES;"
+                echo "SHOW IMAGES IN IMAGE REPOSITORY FASTAPI_REPO;"
+                echo ""
+                echo "-- 2. Create or update service"
+                echo "-- See CREATE SERVICE command in snowflake/05_spcs_setup.sql"
+                echo "-- Update image tag to: /ltc_api_repo/images/fastapi_repo/ltc-api:$(IMAGE_TAG)"
+
