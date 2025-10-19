@@ -21,9 +21,12 @@ jobs:
         uses: docker/setup-buildx-action@v3
       
       - name: Log in to Snowflake Registry
+        env:
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
         run: |
-          echo "${{ secrets.SNOWFLAKE_PASSWORD }}" | docker login ${{ env.REGISTRY }} \
-            --username ${{ secrets.SNOWFLAKE_USER }} \
+          echo "$SNOWFLAKE_PASSWORD" | docker login ${{ env.REGISTRY }} \
+            --username "$SNOWFLAKE_USER" \
             --password-stdin
       
       - name: Build version tag
